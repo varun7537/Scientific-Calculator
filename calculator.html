@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scientific Calculator - Python Backend</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="calculator">
+        <div class="header">
+            <h1>Scientific Calculator</h1>
+            <div id="connectionStatus" class="connection-status status-disconnected">
+                Disconnected
+            </div>
+        </div>
+
+        <div class="display">
+            <div id="memoryIndicator" class="memory-indicator">M</div>
+            <div id="expression" class="expression"></div>
+            <div id="result" class="result">0</div>
+        </div>
+
+        <div class="error" id="errorDisplay"></div>
+        <div class="success" id="successDisplay"></div>
+
+        <div class="input-section">
+            <input type="text" id="expressionInput" class="expression-input" placeholder="Enter mathematical expression...">
+        </div>
+
+        <div class="controls">
+            <button class="control-btn" id="connectBtn" onclick="connectToServer()">Connect</button>
+            <button class="control-btn" onclick="clearAll()">Clear All</button>
+            <button class="control-btn" onclick="toggleHistory()">History</button>
+        </div>
+
+        <div class="button-grid">
+            <button class="btn btn-function" onclick="insertFunction('sin(')">sin</button>
+            <button class="btn btn-function" onclick="insertFunction('cos(')">cos</button>
+            <button class="btn btn-function" onclick="insertFunction('tan(')">tan</button>
+            <button class="btn btn-function" onclick="insertFunction('log(')">log</button>
+            <button class="btn btn-function" onclick="insertFunction('ln(')">ln</button>
+
+            <button class="btn btn-function" onclick="insertFunction('asin(')">asin</button>
+            <button class="btn btn-function" onclick="insertFunction('acos(')">acos</button>
+            <button class="btn btn-function" onclick="insertFunction('atan(')">atan</button>
+            <button class="btn btn-function" onclick="insertFunction('sqrt(')">√</button>
+            <button class="btn btn-special" onclick="insertText('π')">π</button>
+
+            <button class="btn btn-memory" onclick="memoryStore()">MS</button>
+            <button class="btn btn-memory" onclick="memoryRecall()">MR</button>
+            <button class="btn btn-memory" onclick="memoryClear()">MC</button>
+            <button class="btn btn-memory" onclick="memoryAdd()">M+</button>
+            <button class="btn btn-special" onclick="insertText('e')">e</button>
+
+            <button class="btn btn-clear" onclick="clearExpression()">C</button>
+            <button class="btn btn-operator" onclick="insertText('/')">/</button>
+            <button class="btn btn-operator" onclick="insertText('*')">×</button>
+            <button class="btn btn-operator" onclick="deleteChar()">⌫</button>
+            <button class="btn btn-function" onclick="insertFunction('factorial(')">n!</button>
+
+            <button class="btn btn-number" onclick="insertText('7')">7</button>
+            <button class="btn btn-number" onclick="insertText('8')">8</button>
+            <button class="btn btn-number" onclick="insertText('9')">9</button>
+            <button class="btn btn-operator" onclick="insertText('-')">-</button>
+            <button class="btn btn-operator" onclick="insertText('^')">x^y</button>
+
+            <button class="btn btn-number" onclick="insertText('4')">4</button>
+            <button class="btn btn-number" onclick="insertText('5')">5</button>
+            <button class="btn btn-number" onclick="insertText('6')">6</button>
+            <button class="btn btn-operator" onclick="insertText('+')">+</button>
+            <button class="btn btn-function" onclick="insertText('%')">%</button>
+
+            <button class="btn btn-number" onclick="insertText('1')">1</button>
+            <button class="btn btn-number" onclick="insertText('2')">2</button>
+            <button class="btn btn-number" onclick="insertText('3')">3</button>
+            <button class="btn btn-operator" onclick="insertText('(')">(</button>
+            <button class="btn btn-operator" onclick="insertText(')')">)</button>
+
+            <button class="btn btn-number" onclick="insertText('0')">0</button>
+            <button class="btn btn-number" onclick="insertText('.')">.</button>
+            <button class="btn btn-equals" onclick="calculate()">=</button>
+        </div>
+
+        <div id="history" class="history"></div>
+    </div>
+
+    <script>
+        let socket = null;
+        let isConnected = false;
+        let calculationHistory = [];
+        let memoryValue = 0;
+        let lastResult = 0;
+
+        const expressionInput = document.getElementById('expressionInput');
+        const expressionDisplay = document.getElementById('expression');
+        const resultDisplay = document.getElementById('result');
+        const errorDisplay = document.getElementById('errorDisplay');
+        const successDisplay = document.getElementById('successDisplay');
+        const connectionStatus = document.getElementById('connectionStatus');
+        const memoryIndicator = document.getElementById('memoryIndicator');
+        const historyDiv = document.getElementById('history');
+        const connectBtn = document.getElementById('connectBtn');
+
+        document.addEventListener('DOMContentLoaded', function() {
+            expressionInput.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    calculate();
+                }
+            });
+
+            expressionInput.addEventListener('input', function() {
+                updateDisplay();
+            });
+
+            setTimeout(connectToServer, 1000);
+        });
+
+        function connectToServer() {
+            if (isConnected) return;
+
+            updateConnectionStatus('connecting');
+            connectBtn.disabled = true;
+            connectBtn.textContent = 'Connecting...';
+
+            try {
+                const wsUrl = 'ws://localhost:8080';
+                console.log('Attempting to connect to:', wsUrl);
+                
+                socket = new WebSocket(wsUrl);
+
+                socket.onopen = function(event) {
+                    console.log('WebSocket connection opened');
+                    updateConnectionStatus('connected');
+                    connectBtn.textContent = 'Connected';
+                    showSuccess('Connected to calculator server');
+                };
+
+                socket.onmessage = function(event) {
+                    console.log('Received message:', event.data);
+                    try {
+                        const response = JSON.parse(event.data);
+                        handleServerResponse(response);
+                    } catch (error) {
+                        console.error('Error parsing response:', error);
+                        showError('Invalid response from server');
+                    }
+                };
+
+                socket.onclose = function(event) {
+                    console.log('WebSocket connection closed:', event.code, event.reason);
+                    updateConnectionStatus('disconnected');
+                    connectBtn.disabled = false;
+                    connectBtn.textContent = 'Connect';
+                    
+                    if (event.code === 1006) {
+                        showError('Connection failed. Make sure WebSocket bridge is running on port 8080');
+                    } else {
+                        showError('Disconnected from server');
+                    }
+                };
+
+                socket.onerror = function(error) {
+                    console.error('WebSocket error:', error);
+                    updateConnectionStatus('disconnected');
+                    connectBtn.disabled = false;
+                    connectBtn.textContent = 'Connect';
+                    showError('Connection failed. Make sure WebSocket bridge is running on port 8080');
+                };
+
+            } catch (error) {
+                console.error('Error creating WebSocket:', error);
+                updateConnectionStatus('disconnected');
+                connectBtn.disabled = false;
+                connectBtn.textContent = 'Connect';
+                showError('Failed to connect: ' + error.message);
+            }
+        }
+
+        function updateConnectionStatus(status) {
+            isConnected = status === 'connected';
+            
+            if (status === 'connected') {
+                connectionStatus.textContent = 'Connected';
+                connectionStatus.className = 'connection-status status-connected';
+            } else if (status === 'connecting') {
+                connectionStatus.textContent = 'Connecting...';
+                connectionStatus.className = 'connection-status status-connecting';
+            } else {
+                connectionStatus.textContent = 'Disconnected';
+                connectionStatus.className = 'connection-status status-disconnected';
+            }
+            
+            const buttons = document.querySelectorAll('.btn');
+            buttons.forEach(btn => {
+                if (btn.classList.contains('btn-equals') || btn.classList.contains('btn-memory')) {
+                    btn.disabled = !isConnected;
+                }
+            });
+        }
+
+        function sendToServer(request) {
+            if (!isConnected || !socket || socket.readyState !== WebSocket.OPEN) {
+                showError('Not connected to server');
+                return;
+            }
+
+            try {
+                console.log('Sending to server:', request);
+                socket.send(JSON.stringify(request));
+            } catch (error) {
+                console.error('Error sending request:', error);
+                showError('Failed to send request: ' + error.message);
+            }
+        }
+
+        function handleServerResponse(response) {
+            if (response.command === 'calculate_result') {
+                if (response.success) {
+                    resultDisplay.textContent = response.formatted_result;
+                    lastResult = response.result;
+                    
+                    calculationHistory.unshift({
+                        expression: response.expression,
+                        result: response.formatted_result,
+                        timestamp: new Date().toLocaleTimeString()
+                    });
+                    
+                    if (calculationHistory.length > 10) {
+                        calculationHistory.pop();
+                    }
+                    
+                    updateHistoryDisplay();
+                    hideError();
+                } else {
+                    showError(response.error || 'Calculation error');
+                }
+            } else if (response.command === 'memory_result') {
+                if (response.success) {
+                    memoryValue = response.memory;
+                    updateMemoryIndicator();
+                    showSuccess(`Memory ${response.operation}: ${response.memory}`);
+                } else {
+                    showError(response.error || 'Memory operation error');
+                }
+            }
+        }
+
+        function insertText(text) {
+            const cursorPos = expressionInput.selectionStart;
+            const currentValue = expressionInput.value;
+            
+            expressionInput.value = 
+                currentValue.slice(0, cursorPos) + 
+                text + 
+                currentValue.slice(expressionInput.selectionEnd);
+            
+            expressionInput.setSelectionRange(cursorPos + text.length, cursorPos + text.length);
+            expressionInput.focus();
+            updateDisplay();
+        }
+
+        function insertFunction(func) {
+            insertText(func);
+        }
+
+        function deleteChar() {
+            const cursorPos = expressionInput.selectionStart;
+            if (cursorPos > 0) {
+                const currentValue = expressionInput.value;
+                expressionInput.value = 
+                    currentValue.slice(0, cursorPos - 1) + 
+                    currentValue.slice(cursorPos);
+                
+                expressionInput.setSelectionRange(cursorPos - 1, cursorPos - 1);
+                expressionInput.focus();
+                updateDisplay();
+            }
+        }
+
+        function clearExpression() {
+            expressionInput.value = '';
+            updateDisplay();
+            expressionInput.focus();
+        }
+
+        function clearAll() {
+            expressionInput.value = '';
+            resultDisplay.textContent = '0';
+            expressionDisplay.textContent = '';
+            hideError();
+            hideSuccess();
+            calculationHistory = [];
+            updateHistoryDisplay();
+            expressionInput.focus();
+        }
+
+        function updateDisplay() {
+            const expression = expressionInput.value;
+            expressionDisplay.textContent = expression || '';
+        }
+
+        function calculate() {
+            const expression = expressionInput.value.trim();
+            if (!expression) return;
+
+            if (!isConnected) {
+                showError('Not connected to calculator server');
+                return;
+            }
+
+            hideError();
+            hideSuccess();
+
+            const request = {
+                command: 'calculate',
+                expression: expression
+            };
+
+            sendToServer(request);
+        }
+
+        function memoryStore() {
+            if (!isConnected) {
+                showError('Not connected to server');
+                return;
+            }
+
+            const value = lastResult || parseFloat(expressionInput.value) || null;
+            const request = {
+                command: 'memory',
+                operation: 'store',
+                value: value
+            };
+
+            sendToServer(request);
+        }
+
+        function memoryRecall() {
+            if (!isConnected) {
+                showError('Not connected to server');
+                return;
+            }
+
+            const request = {
+                command: 'memory',
+                operation: 'recall'
+            };
+
+            insertText(memoryValue.toString());
+        }
+
+        function memoryClear() {
+            if (!isConnected) {
+                showError('Not connected to server');
+                return;
+            }
+
+            const request = {
+                command: 'memory',
+                operation: 'clear'
+            };
+
+            sendToServer(request);
+        }
+
+        function memoryAdd() {
+            if (!isConnected) {
+                showError('Not connected to server');
+                return;
+            }
+
+            const value = lastResult || parseFloat(expressionInput.value) || null;
+            const request = {
+                command: 'memory',
+                operation: 'add',
+                value: value
+            };
+
+            sendToServer(request);
+        }
+
+        function updateMemoryIndicator() {
+            if (memoryValue !== 0) {
+                memoryIndicator.classList.add('active');
+            } else {
+                memoryIndicator.classList.remove('active');
+            }
+        }
+
+        function showError(message) {
+            errorDisplay.textContent = message;
+            errorDisplay.style.display = 'block';
+            hideSuccess();
+        }
+
+        function hideError() {
+            errorDisplay.style.display = 'none';
+        }
+
+        function showSuccess(message) {
+            successDisplay.textContent = message;
+            successDisplay.style.display = 'block';
+            hideError();
+            setTimeout(hideSuccess, 3000);
+        }
+
+        function hideSuccess() {
+            successDisplay.style.display = 'none';
+        }
+
+        function toggleHistory() {
+            if (historyDiv.style.display === 'none' || !historyDiv.style.display) {
+                historyDiv.style.display = 'block';
+                updateHistoryDisplay();
+            } else {
+                historyDiv.style.display = 'none';
+            }
+        }
+
+        function updateHistoryDisplay() {
+            if (calculationHistory.length === 0) {
+                historyDiv.innerHTML = '<div class="history-item">No calculations yet</div>';
+                return;
+            }
+
+            historyDiv.innerHTML = calculationHistory
+                .map(item => `
+                    <div class="history-item">
+                        <strong>${item.expression}</strong> = ${item.result}
+                        <small style="float: right; color: #666;">${item.timestamp}</small>
+                    </div>
+                `).join('');
+        }
+
+        document.addEventListener('keydown', function(e) {
+            if (e.target !== expressionInput) return;
+            
+            switch(e.key) {
+                case 'Escape':
+                    clearExpression();
+                    e.preventDefault();
+                    break;
+                case 'Backspace':
+                    if (e.ctrlKey) {
+                        clearExpression();
+                        e.preventDefault();
+                    }
+                    break;
+            }
+        });
+
+        function handleServerResponse(response) {
+            console.log('Handling response:', response);
+            
+            if (response.type === 'connection') {
+                if (response.success) {
+                    showSuccess(response.message);
+                    setTimeout(() => sendToServer({command: 'ping'}), 500);
+                }
+                return;
+            }
+            
+            if (response.success) {
+                if (response.result !== undefined) {
+                    resultDisplay.textContent = response.formatted_result || response.result;
+                    lastResult = response.result;
+                    
+                    calculationHistory.unshift({
+                        expression: response.expression || expressionInput.value,
+                        result: response.formatted_result || response.result,
+                        timestamp: new Date().toLocaleTimeString()
+                    });
+                    
+                    if (calculationHistory.length > 10) {
+                        calculationHistory.pop();
+                    }
+                    
+                    updateHistoryDisplay();
+                    hideError();
+                } else if (response.memory !== undefined) {
+                    memoryValue = response.memory;
+                    updateMemoryIndicator();
+                    showSuccess(`Memory ${response.operation}: ${response.memory}`);
+                } else if (response.message) {
+                    console.log('Server status:', response.message);
+                }
+            } else {
+                showError(response.error || 'Unknown error');
+            }
+        }
+    </script>
+</body>
+</html>
